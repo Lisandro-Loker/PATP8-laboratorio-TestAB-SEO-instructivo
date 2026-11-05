@@ -71,14 +71,29 @@ export function emptyLog(): ExperimentLog {
   }
 }
 
-export function assignVariant(_visitorId: string): Variant {
-  // TODO: hash estable. El mismo id tiene que devolver siempre la misma variante.
-  return 'a'
+export function assignVariant(visitorId: string): Variant {
+  const normalized = visitorId.trim()
+  if (!normalized) return 'a'
+
+  // Hash determinístico DJB2 (32-bit unsigned)
+  let hash = 5381
+  for (let i = 0; i < normalized.length; i++) {
+    hash = ((hash << 5) + hash + normalized.charCodeAt(i)) >>> 0
+  }
+
+  return hash % 2 === 0 ? 'a' : 'b'
 }
 
-export function conversionRate(_stats: VariantStats): number | null {
-  // TODO: conversiones / impresiones. Sin impresiones, devolver null, no 0.
-  return null
+export function conversionRate(stats: VariantStats): number | null {
+  if (
+    !Number.isFinite(stats.impressions) ||
+    !Number.isFinite(stats.conversions) ||
+    stats.impressions <= 0 ||
+    stats.conversions < 0
+  ) {
+    return null
+  }
+  return stats.conversions / stats.impressions
 }
 
 export function rateGap(log: ExperimentLog): number | null {
@@ -88,9 +103,41 @@ export function rateGap(log: ExperimentLog): number | null {
   return (treatment - control) * 100
 }
 
-export function parseLog(_raw: string | undefined): ExperimentLog {
-  // TODO: validar el JSON antes de usarlo. Si falla, log vacío.
-  return emptyLog()
+function isValidStats(value: unknown): value is VariantStats {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.impressions === 'number' &&
+    Number.isInteger(record.impressions) &&
+    record.impressions >= 0 &&
+    typeof record.conversions === 'number' &&
+    Number.isInteger(record.conversions) &&
+    record.conversions >= 0
+  )
+}
+
+export function parseLog(raw: string | undefined): ExperimentLog {
+  if (!raw) return emptyLog()
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return emptyLog()
+    const record = parsed as Record<string, unknown>
+    if (!isValidStats(record.a) || !isValidStats(record.b)) {
+      return emptyLog()
+    }
+    return {
+      a: {
+        impressions: record.a.impressions,
+        conversions: record.a.conversions,
+      },
+      b: {
+        impressions: record.b.impressions,
+        conversions: record.b.conversions,
+      },
+    }
+  } catch {
+    return emptyLog()
+  }
 }
 
 export function serializeLog(log: ExperimentLog): string {
